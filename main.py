@@ -3,18 +3,11 @@ import os
 import requests
 import datetime as dt
 
-from utils import details_from_config, get_session
+from utils import details_from_config, get_session, milli_since_e
 from api_details import API_URL, API_AGENT
 from time_tree_struct import TTCalendar, TTEvent
 
 CONFIG_PATH = os.path.join(os.getcwd(), "config.txt")
-
-
-def milli_since_e(datetime_obj):
-    """Return the time format used by TimeTree from a datetime object"""
-    epoch = dt.datetime.utcfromtimestamp(0)
-
-    return (datetime_obj-epoch).total_seconds() * 1000.0
 
 
 def fetch_calendars(s_id, name_filter=None):
@@ -47,6 +40,14 @@ def fetch_calendars(s_id, name_filter=None):
     return cal_list
 
 
+def plot_calendar(calendar_tt):
+    """
+    Plot the events within a TTCalendar visually.
+    :param calendar_tt: TTCalendar object populated with events.
+    :return: None
+    """
+
+
 def main(config_path):
     """Test functionality by requesting and printing calendar events."""
     login_dict = details_from_config(config_path)
@@ -63,7 +64,9 @@ def main(config_path):
     for calendar in calendars:
         calendar.fetch_events(start, end)
 
-    t = 1
+    print(f"Found the following events between {dt.datetime.fromtimestamp(start/1000).strftime('%Y-%m-%d %H:%M:%S.%f')} and {dt.datetime.fromtimestamp(end/1000).strftime('%Y-%m-%d %H:%M:%S.%f')}:")
+    for event in calendar.events:
+        print(f"{dt.datetime.fromtimestamp(event.start/1000).strftime('%Y-%m-%d %H:%M:%S')} - {event.title}")
 
 
 if __name__ == "__main__":

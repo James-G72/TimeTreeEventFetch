@@ -3,6 +3,26 @@ import datetime as dt
 import requests
 
 from api_details import API_URL, API_AGENT
+from utils import milli_since_e
+
+
+def sort_events_by_start(event_list):
+    """Sort provided TTEvents by the date they are due to start."""
+    index_list = []
+    for i, e in enumerate(event_list):
+        index_list.append([e.start, i])
+
+    sorted_list = sorted(index_list)
+
+    return [event_list[x[1]] for x in sorted_list]
+
+def unpack_events(event_list):
+    """Create TTEvent object from a list of calendar events."""
+    tt_events = []
+    for event in event_list:
+        tt_events.append(TTEvent(event))
+
+    return tt_events
 
 
 class TTCalendar(object):
@@ -37,9 +57,9 @@ class TTCalendar(object):
             }
         return _temp_labels
 
-    def _get_events_recur(self, temp_session, since, until):
+    def _get_events_recur(self, temp_session, since):
         """
-        Return events for this calendar between two dates only.
+        Return events for this calendar created between two dates only.
         """
         # Note that the "since" keyword here indicated the event having been updated since that time.
         url = f"{API_URL}/calendar/{self.unique_id}/events/sync?since={since}"
@@ -54,34 +74,40 @@ class TTCalendar(object):
 
         events = r_json["events"]
         if r_json["chunk"] is True:
-            events.extend(self._get_events_recur(temp_session, r_json["since"], until))
+            events.extend(self._get_events_recur(temp_session, r_json["since"]))
 
         return events
 
-    def _unpack_events(self, event_list):
-        """Create TTEvent object from a list of calendar events."""
-        tt_events = []
-        for event in event_list:
-            tt_events.append(TTEvent(event))
-
-        return tt_events
-
     def fetch_events(self, since, until):
-        """Request all events relevant to the calendar between the given times."""
+        """Request all events relevant to the calendar that start between the given times.
+        :param since: Start of event window in milliseconds since epoch
+        :param until: End of event window in milliseconds since epoch
+        :return: None
+        """
         # Create a session in this scope
         _temp_session = requests.Session()
         _temp_session.cookies.set("_session_id", self.s_id)
 
-        events = self._get_events_recur(_temp_session, since, until)
+        url = f"{API_URL}/calendar/{self.unique_id}/events/sync"
+        response = _temp_session.get(
+            url,
+            headers={"Content-Type": "application/json", "X-Timetreea": API_AGENT},
+        )
+        assert response.status_code == 200, print(f"Failed to get events of the calendar {self.name}")
 
-        events_as_tt_event = self._unpack_events(events)
+        r_json = response.json()
+        events = r_json["events"]
+        if r_json["chunk"] is True:
+            events.extend(self._get_events_recur(_temp_session, r_json["since"]))
 
-        for tt_event in events_as_tt_event:
-            t = 1
+        events_tt = unpack_events(events)
 
-        self.events = events_as_tt_event
+        sorted_events_tt = sort_events_by_start(events_tt)
 
-        return events_as_tt_event
+        self.events = []
+        for tt_event in sorted_events_tt:
+            if since <= tt_event.start <= until:
+                self.events.append(tt_event)
 
 
 class TTEvent(object):

@@ -1,6 +1,7 @@
 import os
 import uuid
 import requests
+import datetime as dt
 from api_details import API_URL, API_AGENT
 
 CONFIG_PATH = os.path.join(os.getcwd(), "config.txt")
@@ -52,3 +53,10 @@ def get_session(login_details):
         return session_id
     except KeyError:
         return None
+
+
+def milli_since_e(datetime_obj):
+    """Return the time format used by TimeTree from a datetime object"""
+    epoch = dt.datetime.utcfromtimestamp(0)
+
+    return (datetime_obj-epoch).total_seconds() * 1000.0

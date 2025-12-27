@@ -5,6 +5,7 @@ import datetime as dt
 from api_details import API_URL, API_AGENT
 
 CONFIG_PATH = os.path.join(os.getcwd(), "config.txt")
+DAY_MS = 1000*60*60*24
 
 def details_from_config(config_path):
     """Extract the required username and password from config."""
@@ -55,8 +56,24 @@ def get_session(login_details):
         return None
 
 
-def milli_since_e(datetime_obj):
-    """Return the time format used by TimeTree from a datetime object"""
-    epoch = dt.datetime.utcfromtimestamp(0)
+def dt_to_milli_since_e(datetime_obj):
+    """
+    Return the time format used by TimeTree from a datetime object. Milliseconds since Jan 1st 1970.
+    :param datetime_obj: Datetime.datetime object for conversion.
+    :return: Float of milliseconds since epoch.
+    """
+    epoch = dt.datetime.fromtimestamp(0, tz=dt.timezone.utc)
 
     return (datetime_obj-epoch).total_seconds() * 1000.0
+
+
+def milli_since_e_to_dt(epoch_num):
+    """
+    Return a Datetime.datetime object from milliseconds since Jan 1st 1970.
+    :param epoch_num: Float of milliseconds since epoch.
+    :return: Datetime.datetime object.
+    """
+    # Value is divided by 1000 as the timestamp is assumed in seconds
+    return dt.datetime.fromtimestamp(epoch_num/1000.0, tz=dt.timezone.utc)
+
+

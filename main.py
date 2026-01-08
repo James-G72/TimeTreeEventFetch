@@ -149,18 +149,19 @@ def main(config_path):
 
     calendars = fetch_calendars(sessionn_id, name_filter="Ruth")
 
-    start = dt_to_milli_since_e(dt.datetime.now(tz=dt.timezone.utc) - dt.timedelta(weeks=1))
-    end = dt_to_milli_since_e(dt.datetime.now(tz=dt.timezone.utc))
+    start = dt.datetime.now(tz=dt.timezone.utc) - dt.timedelta(weeks=1)
+    end = dt.datetime.now(tz=dt.timezone.utc)
 
     for calendar in calendars:
-        calendar.fetch_events(start, end)
+        search_start = dt.datetime.now(tz=dt.timezone.utc) - dt.timedelta(weeks=500)
+        calendar.fetch_events(search_start, dt.datetime.now(tz=dt.timezone.utc))
 
-    print(f"Found the following events between {milli_since_e_to_dt(start).strftime(DATE_FMT)} and {milli_since_e_to_dt(end).strftime(DATE_FMT)}:")
-    for e in calendar.events:
-        print(f"{milli_since_e_to_dt(e.start).strftime(DATE_FMT)} - {e.title} - {calendar.known_users[e.author_id]}")
+    for calendar in calendars:
+        calendar.events_between_dates(start, end)
 
     plot_calendar(calendars[0], start, end)
 
 
 if __name__ == "__main__":
     main(CONFIG_PATH)
+    # TODO deal with recurring events in a nice way

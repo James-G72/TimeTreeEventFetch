@@ -1,9 +1,21 @@
 """Defines specific classes for Time Tree data types at different levels"""
 import datetime as dt
+from dateutil.relativedelta import relativedelta
+import pytz
 import requests
 
 from api_details import API_URL, API_AGENT
-from utils import DAY_MS
+from utils import DAY_MS, dt_to_milli_since_e, milli_since_e_to_dt
+
+EXCEPTION_DATE_FMT = "%Y%m%dT%H%M%SZ"
+FULL_RULE_LIST = ["FREQ", "INTERVAL", "WKST", "BYDAY"]
+DATE_FMT = "%d-%m-%Y %H:%M"
+RECUR_GAPS = {
+    "WEEKLY": relativedelta(weeks=+1),
+    "DAILY": relativedelta(days=+1),
+    "MONTHLY": relativedelta(months=+1),
+    "YEARLY": relativedelta(year=+1)
+}
 
 
 def sort_events_by_start(event_list):
@@ -98,10 +110,12 @@ class TTCalendar(object):
 
     def fetch_events(self, since, until):
         """Request all events relevant to the calendar that start between the given times.
-        :param since: Start of event window in milliseconds since epoch
-        :param until: End of event window in milliseconds since epoch
+        :param since: Datetime object for the start
+        :param until: Datetime object for the end
         :return: None
         """
+        since_mse = dt_to_milli_since_e(since)
+        until_mse = dt_to_milli_since_e(until)
         # Create a session in this scope
         _temp_session = requests.Session()
         _temp_session.cookies.set("_session_id", self.s_id)
@@ -124,8 +138,35 @@ class TTCalendar(object):
 
         self.events = []
         for tt_event in sorted_events_tt:
-            if since <= tt_event.start <= until:
+            if since_mse <= tt_event.start <= until_mse:
                 self.events.append(tt_event)
+
+    def events_between_dates(self, start_date, end_date):
+        """
+        Return all events, including recurring events, that occur in the datetime window provided.
+        :param start_date: datetime object for the start of the window
+        :param end_date: datetime object for the start of the window
+        :return:
+        """
+        matching_events = []
+        start_mse = dt_to_milli_since_e(start_date)
+        end_mse = dt_to_milli_since_e(end_date)
+        # Getting all standard events
+        for e in self.events:
+            if start_mse <= e.start <= end_mse:
+                matching_events.append(e)
+            if e.recurs:
+                _r_events = e.recur_within_dates(start_date, end_date)
+                if len(_r_events) > 0:
+                    matching_events.extend(_r_events)
+
+            # TODO implement basic and recurring searching
+
+
+
+        print(f"Found the following events between {start_date.strftime(DATE_FMT)} and {end_date.strftime(DATE_FMT)}:")
+        for e in self.events:
+            print(f"{milli_since_e_to_dt(e.start).strftime(DATE_FMT)} - {e.title} - {self.known_users[e.author_id]}")
 
 
 class TTEvent(object):
@@ -134,6 +175,7 @@ class TTEvent(object):
     def __init__(self, event_dict):
         """Init"""
         self.parent_id = event_dict["calendar_id"]
+        self.recurs = False
 
         self._extract_useful_info(event_dict)
 
@@ -142,11 +184,61 @@ class TTEvent(object):
         self.id = full_dictionary["id"]
         self.author_id = full_dictionary["author_id"]
         self.title = full_dictionary["title"]
+        self.updated = full_dictionary["updated_at"]
         self.start = full_dictionary["start_at"]
-        # All Day events are considered to end on a day, but last for all of it. A day worth of milliseconds therefore needs to be added.
+        # All Day events are considered to end on a day, but last for all of it.
+        # A day worth of milliseconds therefore needs to be added.
         if full_dictionary["all_day"]:
             self.end = full_dictionary["end_at"] + DAY_MS
         else:
             self.end = full_dictionary["end_at"]
         self.start = full_dictionary["start_at"]
         self.label_id = full_dictionary["label_id"]
+        if len(full_dictionary["recurrences"]) > 0:
+            self._store_recurance(full_dictionary["recurrences"])
+
+    def _unpack_rules(self, rule_list):
+        """Unpack all rules from the list."""
+        _tmp_rule_dict = {}
+        for rule in FULL_RULE_LIST:
+            if rule in rule_list:
+                _tmp_rule_dict[rule] = rule_list.split(rule)[1].split("=")[1].split(";")[0]
+
+        self.recur_rules = _tmp_rule_dict
+
+    def _store_recurance(self, rule_list):
+        exceptions = [x.split("EXDATE:")[1] for x in rule_list[1:]]
+        exceptions_dt = [dt.datetime.strptime(exp, EXCEPTION_DATE_FMT) for exp in exceptions]
+        for idx, exp_dt in enumerate(exceptions_dt):
+            exceptions_dt[idx] = pytz.utc.localize(exp_dt)
+
+        self._unpack_rules(rule_list[0])
+
+        if len(exceptions_dt) > 0:
+            self.recur_rules["EXDATE"] = [dt_to_milli_since_e(exp_dt) for exp_dt in exceptions_dt]
+            self.recur_exceptions = 1
+
+        self.recurs = True
+
+    def recur_within_dates(self, start_date, end_date):
+        """
+        Return all instances of the event that occur within a time frame.
+        :param start_date: datetime object of start
+        :param end_date: datetime object of end
+        :return: All recur instances in that span.
+        """
+        self_start = milli_since_e_to_dt(self.start)
+        # Preventing the function from wasting time and memory calculating recurrences
+        if self_start > end_date:
+            return []
+
+        latest_event_time = self_start
+        recur_gap = RECUR_GAPS[self.recur_rules["FREQ"]]
+        interval = int(self.recur_rules["INTERVAL"])
+        instances = []
+        while latest_event_time < end_date:
+            latest_event_time += recur_gap * interval
+            if start_date <= latest_event_time <= end_date:
+                instances.append(latest_event_time)
+
+        return instances

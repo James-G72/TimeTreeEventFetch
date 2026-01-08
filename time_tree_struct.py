@@ -3,18 +3,20 @@ import datetime as dt
 from dateutil.relativedelta import relativedelta
 import pytz
 import requests
+import re
 
 from api_details import API_URL, API_AGENT
 from utils import DAY_MS, dt_to_milli_since_e, milli_since_e_to_dt
 
 EXCEPTION_DATE_FMT = "%Y%m%dT%H%M%SZ"
-FULL_RULE_LIST = ["FREQ", "INTERVAL", "WKST", "BYDAY"]
-DATE_FMT = "%d-%m-%Y %H:%M"
+PRINT_DATE_FMT = "%d-%m-%Y %H:%M"
+UNTIL_DATE_FMT = "%Y%m%d"
+FULL_RULE_LIST = ["FREQ", "INTERVAL", "WKST", "BYDAY", "UNTIL"]
 RECUR_GAPS = {
     "WEEKLY": relativedelta(weeks=+1),
     "DAILY": relativedelta(days=+1),
     "MONTHLY": relativedelta(months=+1),
-    "YEARLY": relativedelta(year=+1)
+    "YEARLY": relativedelta(years=+1)
 }
 
 
@@ -55,6 +57,7 @@ class TTCalendar(object):
         :param response_dict: Full response from the API with all calendar information.
         """
         self.events = None
+        self.bounds = None
         self.s_id = session_id
         # Unpack the API response to get basic data
         self._extract_useful_info(response_dict)
@@ -99,7 +102,7 @@ class TTCalendar(object):
                                     )
 
         assert response.status_code == 200, print(f"Failed to get events of the calendar {self.name}")
-        
+
         r_json = response.json()
 
         events = r_json["events"]
@@ -141,9 +144,12 @@ class TTCalendar(object):
             if since_mse <= tt_event.start <= until_mse:
                 self.events.append(tt_event)
 
+        self.bounds = [since, until]
+
     def events_between_dates(self, start_date, end_date):
         """
         Return all events, including recurring events, that occur in the datetime window provided.
+        Recurring events are returned as TTEventRecurence objects
         :param start_date: datetime object for the start of the window
         :param end_date: datetime object for the start of the window
         :return:
@@ -160,13 +166,7 @@ class TTCalendar(object):
                 if len(_r_events) > 0:
                     matching_events.extend(_r_events)
 
-            # TODO implement basic and recurring searching
-
-
-
-        print(f"Found the following events between {start_date.strftime(DATE_FMT)} and {end_date.strftime(DATE_FMT)}:")
-        for e in self.events:
-            print(f"{milli_since_e_to_dt(e.start).strftime(DATE_FMT)} - {e.title} - {self.known_users[e.author_id]}")
+        return matching_events
 
 
 class TTEvent(object):
@@ -192,7 +192,7 @@ class TTEvent(object):
             self.end = full_dictionary["end_at"] + DAY_MS
         else:
             self.end = full_dictionary["end_at"]
-        self.start = full_dictionary["start_at"]
+        self.duration = self.end - self.start
         self.label_id = full_dictionary["label_id"]
         if len(full_dictionary["recurrences"]) > 0:
             self._store_recurance(full_dictionary["recurrences"])
@@ -220,6 +220,16 @@ class TTEvent(object):
 
         self.recurs = True
 
+    def _handle_until_fmt(self, date):
+        """The until recurrence flag seems to have inconsistent formatting."""
+        for try_fmt in [EXCEPTION_DATE_FMT, UNTIL_DATE_FMT]:
+            try:
+                dt_obj = dt.datetime.strptime(date, try_fmt)
+                return pytz.utc.localize(dt_obj)
+            except:
+                pass
+        return None
+
     def recur_within_dates(self, start_date, end_date):
         """
         Return all instances of the event that occur within a time frame.
@@ -228,17 +238,50 @@ class TTEvent(object):
         :return: All recur instances in that span.
         """
         self_start = milli_since_e_to_dt(self.start)
+
         # Preventing the function from wasting time and memory calculating recurrences
+        if "UNTIL" in self.recur_rules.keys():
+            recur_finish_date = self._handle_until_fmt(self.recur_rules["UNTIL"])
+            if recur_finish_date < start_date:
+                return []
         if self_start > end_date:
             return []
 
+        # Getting exception dates if they're there
+        if "EXDATE" in self.recur_rules.keys():
+            exceptions = self.recur_rules["EXDATE"]
+        else:
+            exceptions = []
+
         latest_event_time = self_start
         recur_gap = RECUR_GAPS[self.recur_rules["FREQ"]]
-        interval = int(self.recur_rules["INTERVAL"])
+        if "INTERVAL" in self.recur_rules.keys():
+            interval = int(self.recur_rules["INTERVAL"])
+        else:
+            # I have only seen interval not used in the context where it is a weekly recurring event
+            interval = 1
         instances = []
+        print(f"Processing {self.title}")
         while latest_event_time < end_date:
             latest_event_time += recur_gap * interval
             if start_date <= latest_event_time <= end_date:
-                instances.append(latest_event_time)
+                if dt_to_milli_since_e(latest_event_time) not in exceptions:
+                    _latest_end = latest_event_time + dt.timedelta(milliseconds=self.duration)
+                instances.append(TTEventRecur(self, latest_event_time, _latest_end))
+            if dt_to_milli_since_e(latest_event_time) in exceptions:
+                curr_date_mse = dt_to_milli_since_e(latest_event_time)
+                t = 1
 
         return instances
+
+
+# I am unsure at this stage if this is the best way to implement this
+class TTEventRecur(object):
+    """Event Object that relates to a single occurrence of a TTEvent. A TTEventRecur must have a parent TTEvent object."""
+
+    def __init__(self, parent_event, instance_start, instance_end):
+        """Initialise from the parent TTEvent."""
+        self.parent_id = parent_event.id
+        self.start = dt_to_milli_since_e(instance_start)
+        self.end = dt_to_milli_since_e(instance_end)
+        self.title = parent_event.title

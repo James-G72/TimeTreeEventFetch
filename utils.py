@@ -76,4 +76,3 @@ def milli_since_e_to_dt(epoch_num):
     # Value is divided by 1000 as the timestamp is assumed in seconds
     return dt.datetime.fromtimestamp(epoch_num/1000.0, tz=dt.timezone.utc)
 
-

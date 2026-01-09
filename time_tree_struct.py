@@ -28,7 +28,7 @@ def sort_events_by_start(event_list):
     """
     index_list = []
     for i, e in enumerate(event_list):
-        index_list.append([e.start, i])
+        index_list.append([e.start.as_ms(), i])
 
     sorted_list = sorted(index_list)
 
@@ -45,6 +45,49 @@ def unpack_events(event_list):
         tt_events.append(TTEvent(event))
 
     return tt_events
+
+
+# TODO add the operator functionality such that the TTTime objects can be used directly as datetime objects and compared
+class TTTime(object):
+    """A custom time object that prevents the need to convert from datetime to milliseconds since epoch."""
+
+    def __init__(self, dt_object=None, ms_since_e=None):
+        """
+        Initialise with either a milliseconds since epoch or a datetime object. Datetime object takes priority.
+        :param dt_object: datetime object as input.
+        :param ms_since_e: float of milliseconds since epoch.
+        """
+        if dt_object:
+            _time = dt_object
+        elif ms_since_e:
+            _time = milli_since_e_to_dt(ms_since_e)
+        else: raise Exception("Neither dt_object not ms_since_e passed when initialising TTTIme object.")
+
+        if not _time.tzinfo:
+            self.time = pytz.utc.localize(_time)
+        else:
+            self.time = _time
+
+    def as_ms(self):
+        """Return the time as milliseconds since epoch."""
+        return dt_to_milli_since_e(self.time)
+
+    def as_dt(self):
+        """Return the time as a datetime object."""
+        return self.time
+
+    def as_str(self):
+        """Return the time as a string."""
+        return self.time.strftime(EXCEPTION_DATE_FMT)
+
+    def apply_delta(self, duration, repeats=1):
+        """
+        Use relativedelta objects to modify the time
+        :param duration: relative delta object with a signed delta application.
+        :param repeats: integer value that allows for multiple applications of the delta
+        :return: None
+        """
+        self.time += duration * repeats
 
 
 class TTCalendar(object):
@@ -92,11 +135,11 @@ class TTCalendar(object):
         """
         Return events for this calendar created between two dates only.
         :param temp_session: Requests session object with the session_id stored.
-        :param since: Start time for the query (interpreted as updated since).
+        :param since: TTTime for start time for the query (interpreted as updated since).
         :return: List of events from the server.
         """
         # Note that the "since" keyword here indicated the event having been updated since that time.
-        url = f"{API_URL}/calendar/{self.unique_id}/events/sync?since={since}"
+        url = f"{API_URL}/calendar/{self.unique_id}/events/sync?since={since.as_ms()}"
         response = temp_session.get(url,
                                     headers={"Content-Type": "application/json", "X-Timetreea": API_AGENT},
                                     )
@@ -107,18 +150,17 @@ class TTCalendar(object):
 
         events = r_json["events"]
         if r_json["chunk"] is True:
-            events.extend(self._get_events_recur(temp_session, r_json["since"]))
+            since_time = TTTime(ms_since_e=r_json["since"])
+            events.extend(self._get_events_recur(temp_session, since_time))
 
         return events
 
     def fetch_events(self, since, until):
         """Request all events relevant to the calendar that start between the given times.
-        :param since: Datetime object for the start
-        :param until: Datetime object for the end
+        :param since: TTTime object for the start
+        :param until: TTTime object for the end
         :return: None
         """
-        since_mse = dt_to_milli_since_e(since)
-        until_mse = dt_to_milli_since_e(until)
         # Create a session in this scope
         _temp_session = requests.Session()
         _temp_session.cookies.set("_session_id", self.s_id)
@@ -133,7 +175,8 @@ class TTCalendar(object):
         r_json = response.json()
         events = r_json["events"]
         if r_json["chunk"] is True:
-            events.extend(self._get_events_recur(_temp_session, r_json["since"]))
+            since_time = TTTime(ms_since_e=r_json["since"])
+            events.extend(self._get_events_recur(_temp_session, since_time))
 
         events_tt = unpack_events(events)
 
@@ -141,7 +184,7 @@ class TTCalendar(object):
 
         self.events = []
         for tt_event in sorted_events_tt:
-            if since_mse <= tt_event.start <= until_mse:
+            if since.as_dt() <= tt_event.start.as_dt() <= until.as_dt():
                 self.events.append(tt_event)
 
         self.bounds = [since, until]
@@ -155,11 +198,9 @@ class TTCalendar(object):
         :return:
         """
         matching_events = []
-        start_mse = dt_to_milli_since_e(start_date)
-        end_mse = dt_to_milli_since_e(end_date)
         # Getting all standard events
         for e in self.events:
-            if start_mse <= e.start <= end_mse:
+            if start_date.as_dt() <= e.start.as_dt() <= end_date.as_dt():
                 matching_events.append(e)
             if e.recurs:
                 _r_events = e.recur_within_dates(start_date, end_date)
@@ -185,14 +226,14 @@ class TTEvent(object):
         self.author_id = full_dictionary["author_id"]
         self.title = full_dictionary["title"]
         self.updated = full_dictionary["updated_at"]
-        self.start = full_dictionary["start_at"]
+        self.start = TTTime(ms_since_e=full_dictionary["start_at"])
         # All Day events are considered to end on a day, but last for all of it.
         # A day worth of milliseconds therefore needs to be added.
         if full_dictionary["all_day"]:
-            self.end = full_dictionary["end_at"] + DAY_MS
+            self.end = TTTime(ms_since_e=full_dictionary["end_at"] + DAY_MS)
         else:
-            self.end = full_dictionary["end_at"]
-        self.duration = self.end - self.start
+            self.end = TTTime(ms_since_e=full_dictionary["end_at"])
+        self.duration = self.end.as_ms() - self.start.as_ms()
         self.label_id = full_dictionary["label_id"]
         if len(full_dictionary["recurrences"]) > 0:
             self._store_recurance(full_dictionary["recurrences"])
@@ -208,14 +249,12 @@ class TTEvent(object):
 
     def _store_recurance(self, rule_list):
         exceptions = [x.split("EXDATE:")[1] for x in rule_list[1:]]
-        exceptions_dt = [dt.datetime.strptime(exp, EXCEPTION_DATE_FMT) for exp in exceptions]
-        for idx, exp_dt in enumerate(exceptions_dt):
-            exceptions_dt[idx] = pytz.utc.localize(exp_dt)
+        exceptions_dt = [TTTime(dt_object=dt.datetime.strptime(exp, EXCEPTION_DATE_FMT)) for exp in exceptions]
 
         self._unpack_rules(rule_list[0])
 
         if len(exceptions_dt) > 0:
-            self.recur_rules["EXDATE"] = [dt_to_milli_since_e(exp_dt) for exp_dt in exceptions_dt]
+            self.recur_rules["EXDATE"] = exceptions_dt
             self.recur_exceptions = 1
 
         self.recurs = True
@@ -225,7 +264,7 @@ class TTEvent(object):
         for try_fmt in [EXCEPTION_DATE_FMT, UNTIL_DATE_FMT]:
             try:
                 dt_obj = dt.datetime.strptime(date, try_fmt)
-                return pytz.utc.localize(dt_obj)
+                return TTTime(dt_object=dt_obj)
             except:
                 pass
         return None
@@ -233,27 +272,25 @@ class TTEvent(object):
     def recur_within_dates(self, start_date, end_date):
         """
         Return all instances of the event that occur within a time frame.
-        :param start_date: datetime object of start
-        :param end_date: datetime object of end
+        :param start_date: TTTime object of start
+        :param end_date: TTTime object of end
         :return: All recur instances in that span.
         """
-        self_start = milli_since_e_to_dt(self.start)
-
         # Preventing the function from wasting time and memory calculating recurrences
         if "UNTIL" in self.recur_rules.keys():
             recur_finish_date = self._handle_until_fmt(self.recur_rules["UNTIL"])
-            if recur_finish_date < start_date:
+            if recur_finish_date.as_dt() < start_date.as_dt():
                 return []
-        if self_start > end_date:
+        if self.start.as_dt() > end_date.as_dt():
             return []
 
         # Getting exception dates if they're there
         if "EXDATE" in self.recur_rules.keys():
-            exceptions = self.recur_rules["EXDATE"]
+            exceptions = [x.as_ms() for x in self.recur_rules["EXDATE"]]
         else:
             exceptions = []
 
-        latest_event_time = self_start
+        latest_event_time = self.start
         recur_gap = RECUR_GAPS[self.recur_rules["FREQ"]]
         if "INTERVAL" in self.recur_rules.keys():
             interval = int(self.recur_rules["INTERVAL"])
@@ -262,14 +299,14 @@ class TTEvent(object):
             interval = 1
         instances = []
         print(f"Processing {self.title}")
-        while latest_event_time < end_date:
-            latest_event_time += recur_gap * interval
-            if start_date <= latest_event_time <= end_date:
-                if dt_to_milli_since_e(latest_event_time) not in exceptions:
-                    _latest_end = latest_event_time + dt.timedelta(milliseconds=self.duration)
-                instances.append(TTEventRecur(self, latest_event_time, _latest_end))
-            if dt_to_milli_since_e(latest_event_time) in exceptions:
-                curr_date_mse = dt_to_milli_since_e(latest_event_time)
+        while latest_event_time.as_dt() < end_date.as_dt():
+            latest_event_time.apply_delta(recur_gap, interval)
+            if start_date.as_dt() <= latest_event_time.as_dt() <= end_date.as_dt():
+                if latest_event_time.as_ms() not in exceptions:
+                    _latest_end = latest_event_time.as_dt() + dt.timedelta(milliseconds=self.duration)
+                instances.append(TTEventRecur(self, latest_event_time, TTTime(dt_object=_latest_end)))
+            if latest_event_time.as_ms() in exceptions:
+                curr_date_mse = latest_event_time.as_ms()
                 t = 1
 
         return instances
@@ -282,6 +319,6 @@ class TTEventRecur(object):
     def __init__(self, parent_event, instance_start, instance_end):
         """Initialise from the parent TTEvent."""
         self.parent_id = parent_event.id
-        self.start = dt_to_milli_since_e(instance_start)
-        self.end = dt_to_milli_since_e(instance_end)
+        self.start = instance_start
+        self.end = instance_end
         self.title = parent_event.title

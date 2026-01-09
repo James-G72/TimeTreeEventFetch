@@ -9,7 +9,7 @@ from matplotlib.patches import Patch
 
 from utils import details_from_config, get_session, dt_to_milli_since_e, milli_since_e_to_dt
 from api_details import API_URL, API_AGENT
-from time_tree_struct import TTCalendar
+from time_tree_struct import TTCalendar, TTTime
 
 CONFIG_PATH = os.path.join(os.getcwd(), "config.txt")
 
@@ -57,8 +57,8 @@ def plot_calendar(events, start, end):
     """
     # Create dummy date
     titles = [e.title for e in events]
-    start_dates = [milli_since_e_to_dt(e.start).strftime(DATE_FMT) for e in events]
-    end_dates = [milli_since_e_to_dt(e.end).strftime(DATE_FMT) for e in events]
+    start_dates = [e.start.as_str() for e in events]
+    end_dates = [e.end.as_str() for e in events]
 
     # Setup the dates and calculate durations
     start_dates = [datestr2num(d) for d in start_dates]
@@ -145,16 +145,15 @@ def main(config_path):
 
     print(f"TimeTree API Session ID is: {sessionn_id}")
 
-    milli_since_e_to_dt(1739469600000)
-
     calendars = fetch_calendars(sessionn_id, name_filter="Ruth")
 
+    search_end = TTTime(dt_object=dt.datetime.now() + dt.timedelta(weeks=1))
+    search_start = TTTime(dt_object=dt.datetime.now() - dt.timedelta(weeks=1000))
+
     for calendar in calendars:
-        search_start = dt.datetime.now(tz=dt.timezone.utc) - dt.timedelta(weeks=1000)
-        search_end = dt.datetime.now(tz=dt.timezone.utc) + dt.timedelta(weeks=1)
         calendar.fetch_events(search_start, search_end)
 
-    search_start = dt.datetime.now(tz=dt.timezone.utc)-dt.timedelta(weeks=1)
+    search_start = TTTime(dt_object=dt.datetime.now()-dt.timedelta(weeks=1))
 
     for calendar in calendars:
         relevent_events = calendar.events_between_dates(search_start, search_end)

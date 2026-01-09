@@ -67,12 +67,12 @@ def dt_to_milli_since_e(datetime_obj):
     return (datetime_obj-epoch).total_seconds() * 1000.0
 
 
-def milli_since_e_to_dt(epoch_num):
+def milli_since_e_to_dt(ms_since_e):
     """
     Return a Datetime.datetime object from milliseconds since Jan 1st 1970.
     :param epoch_num: Float of milliseconds since epoch.
     :return: Datetime.datetime object.
     """
     # Value is divided by 1000 as the timestamp is assumed in seconds
-    return dt.datetime.fromtimestamp(epoch_num/1000.0, tz=dt.timezone.utc)
+    return dt.datetime.fromtimestamp(ms_since_e/1000.0)
 

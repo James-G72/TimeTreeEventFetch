@@ -6,14 +6,16 @@ import matplotlib.pyplot as plt
 from matplotlib.dates import datestr2num, DateFormatter, DayLocator
 from matplotlib.ticker import AutoMinorLocator
 from matplotlib.patches import Patch
+import tabulate
+from typing import List
 
-from utils import details_from_config, get_session, dt_to_milli_since_e, milli_since_e_to_dt
+from utils import details_from_config, get_session
 from api_details import API_URL, API_AGENT
-from time_tree_struct import TTCalendar, TTTime
+from time_tree_struct import TTCalendar, TTEvent, TTTime
 
 CONFIG_PATH = os.path.join(os.getcwd(), "config.txt")
 
-DATE_FMT = "%d-%m-%Y %H:%M"
+DATE_FMT = "%d-%b-%Y %H:%M"
 
 
 def fetch_calendars(s_id, name_filter=None):
@@ -133,6 +135,48 @@ def plot_calendar(events, start, end):
     plt.show()
 
 
+def run_live_view(calendar: TTCalendar, refresh_interval_s: int):
+    """
+    Print the events to the command line and refresh the view periodically.
+    :param calendar: Calendar to be queried and displayed.
+    :param refresh_interval_s: integer of seconds after which to perform a sync.
+    :return: None
+    """
+    disp_start = TTTime(dt_object=dt.datetime.now() - dt.timedelta(days=1))
+    disp_end = TTTime(dt_object=dt.datetime.now() + dt.timedelta(days=7))
+
+    # If no start and end times are passed to the fetch_events function then all events are fetched.
+    calendar.fetch_events()
+    # TODO it optional for event_between_dates to round to the whole day when filtering
+    relevant_events = calendar.events_between_dates(disp_start, disp_end)
+
+    print(f" -- Printing Events between {disp_start.as_dt().strftime(DATE_FMT)} and {disp_end.as_dt().strftime(DATE_FMT)} -- ")
+    print_events(relevant_events, calendar.recur_events, calendar.label_data, calendar.known_users)
+
+
+def print_events(events: List[TTEvent], recur_events: list, labels: dict, users: dict):
+    """
+    Print a list of events in chronological order with nice formatting.
+    :param events: List of TTEvent objects to be printed.
+    :param recur_events: List of all recurring events that could be parents of TTEventRecurs
+    :param labels: List of label information.
+    :param users: List of author information.
+    :return:
+    """
+    # Creating tabulate header and table list
+    headers = ["Date", "Title", "Label", "Author"]
+    entries = []
+    for event in events:
+        entries.append(
+            [event.start.as_dt().strftime(DATE_FMT),
+             event.title,
+             labels[event.label_id]["name"],
+             users[event.author_id],
+            ]
+        )
+    print(tabulate.tabulate(entries, headers, tablefmt="simple_outline", colalign=("centre",)))
+
+
 def main(config_path):
     """
     Test functionality by requesting and printing calendar events.
@@ -145,20 +189,10 @@ def main(config_path):
 
     print(f"TimeTree API Session ID is: {sessionn_id}")
 
-    calendars = fetch_calendars(sessionn_id, name_filter="Ruth")
+    # This line assumes that there is only one calendar called Ruth
+    main_calendar = fetch_calendars(sessionn_id, name_filter="Ruth")[0]
 
-    search_end = TTTime(dt_object=dt.datetime.now() + dt.timedelta(weeks=1))
-    search_start = TTTime(dt_object=dt.datetime.now() - dt.timedelta(weeks=1000))
-
-    for calendar in calendars:
-        calendar.fetch_events(search_start, search_end)
-
-    search_start = TTTime(dt_object=dt.datetime.now()-dt.timedelta(weeks=1))
-
-    for calendar in calendars:
-        relevent_events = calendar.events_between_dates(search_start, search_end)
-
-    plot_calendar(relevent_events, search_start, search_end)
+    run_live_view(main_calendar, 100)
 
 
 if __name__ == "__main__":

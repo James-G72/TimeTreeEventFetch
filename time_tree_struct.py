@@ -100,6 +100,7 @@ class TTCalendar(object):
         :param response_dict: Full response from the API with all calendar information.
         """
         self.events = None
+        self.recur_events = None
         self.bounds = None
         self.s_id = session_id
         # Unpack the API response to get basic data
@@ -116,6 +117,7 @@ class TTCalendar(object):
         self.unique_id = resp["id"]
         self.known_users = dict([[user["user_id"], user["name"]] for user in resp["calendar_users"]])
         self._extract_event_labels(resp["calendar_labels"])
+        self.created = TTTime(ms_since_e=resp["created_at"])
 
     def _extract_event_labels(self, label_list):
         """
@@ -155,12 +157,17 @@ class TTCalendar(object):
 
         return events
 
-    def fetch_events(self, since, until):
+    def fetch_events(self, since=None, until=None):
         """Request all events relevant to the calendar that start between the given times.
         :param since: TTTime object for the start
         :param until: TTTime object for the end
         :return: None
         """
+        if not until:
+            # Setting the end date to an infeasibly distant date
+            until = TTTime(dt_object=dt.datetime.now()+dt.timedelta(weeks=1000))
+        if not since:
+            since = self.created
         # Create a session in this scope
         _temp_session = requests.Session()
         _temp_session.cookies.set("_session_id", self.s_id)
@@ -183,9 +190,13 @@ class TTCalendar(object):
         sorted_events_tt = sort_events_by_start(events_tt)
 
         self.events = []
+        self.recur_events = []
         for tt_event in sorted_events_tt:
             if since.as_dt() <= tt_event.start.as_dt() <= until.as_dt():
-                self.events.append(tt_event)
+                if tt_event.recurs:
+                    self.recur_events.append(tt_event)
+                else:
+                    self.events.append(tt_event)
 
         self.bounds = [since, until]
 
@@ -202,10 +213,11 @@ class TTCalendar(object):
         for e in self.events:
             if start_date.as_dt() <= e.start.as_dt() <= end_date.as_dt():
                 matching_events.append(e)
-            if e.recurs:
-                _r_events = e.recur_within_dates(start_date, end_date)
-                if len(_r_events) > 0:
-                    matching_events.extend(_r_events)
+
+        for r_e in self.recur_events:
+            _r_events = r_e.recur_within_dates(start_date, end_date)
+            if len(_r_events) > 0:
+                matching_events.extend(_r_events)
 
         return matching_events
 

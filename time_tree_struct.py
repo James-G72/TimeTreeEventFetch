@@ -3,7 +3,7 @@ import datetime as dt
 from dateutil.relativedelta import relativedelta
 import pytz
 import requests
-import re
+from typing import List
 
 from api_details import API_URL, API_AGENT
 from utils import DAY_MS, dt_to_milli_since_e, milli_since_e_to_dt
@@ -20,7 +20,7 @@ RECUR_GAPS = {
 }
 
 
-def sort_events_by_start(event_list):
+def sort_events_by_start(event_list: list):
     """
     Sort provided TTEvents by the date they are due to start.
     :param event_list: list of TTEvent objects.
@@ -29,6 +29,21 @@ def sort_events_by_start(event_list):
     index_list = []
     for i, e in enumerate(event_list):
         index_list.append([e.start.as_ms(), i])
+
+    sorted_list = sorted(index_list)
+
+    return [event_list[x[1]] for x in sorted_list]
+
+
+def sort_events_by_updated(event_list: list):
+    """
+    Sort provided TTEvents by the date they are due to start.
+    :param event_list: list of TTEvent objects.
+    :return: event_list sorted by the start value of each tt_event object.
+    """
+    index_list = []
+    for i, e in enumerate(event_list):
+        index_list.append([e.updated.as_ms(), i])
 
     sorted_list = sorted(index_list)
 
@@ -133,6 +148,20 @@ class TTCalendar(object):
             }
         self.label_data = _temp_labels
 
+    def _contact_api(self, session, url):
+        """
+        Get an individual response from the TimeTree API.
+        :type session: requests session object to be queried
+        :param url: Later part of he url to hit at the API
+        :return: full response from the API
+        """
+        response = session.get(url,
+                               headers={"Content-Type": "application/json", "X-Timetreea": API_AGENT},
+                               )
+        assert response.status_code == 200, print(f"Failed to get events of the calendar {self.name}")
+
+        return response.json()
+
     def _get_events_recur(self, temp_session, since):
         """
         Return events for this calendar created between two dates only.
@@ -142,13 +171,7 @@ class TTCalendar(object):
         """
         # Note that the "since" keyword here indicated the event having been updated since that time.
         url = f"{API_URL}/calendar/{self.unique_id}/events/sync?since={since.as_ms()}"
-        response = temp_session.get(url,
-                                    headers={"Content-Type": "application/json", "X-Timetreea": API_AGENT},
-                                    )
-
-        assert response.status_code == 200, print(f"Failed to get events of the calendar {self.name}")
-
-        r_json = response.json()
+        r_json = self._contact_api(temp_session, url)
 
         events = r_json["events"]
         if r_json["chunk"] is True:
@@ -173,13 +196,8 @@ class TTCalendar(object):
         _temp_session.cookies.set("_session_id", self.s_id)
 
         url = f"{API_URL}/calendar/{self.unique_id}/events/sync"
-        response = _temp_session.get(
-            url,
-            headers={"Content-Type": "application/json", "X-Timetreea": API_AGENT},
-        )
-        assert response.status_code == 200, print(f"Failed to get events of the calendar {self.name}")
+        r_json = self._contact_api(_temp_session, url)
 
-        r_json = response.json()
         events = r_json["events"]
         if r_json["chunk"] is True:
             since_time = TTTime(ms_since_e=r_json["since"])
@@ -221,6 +239,62 @@ class TTCalendar(object):
 
         return matching_events
 
+    def _new_event(self, new_event):
+        """
+        If an event has been created or updated, it needs to be replaced by id or appended if new.
+        :param new_event: A new TTEvent object.
+        :return:
+        """
+        # Check for the ID in the events
+        for idx, e in enumerate(self.events):
+            if e.id == new_event.id:
+                self.events[idx] = new_event
+                return
+
+        # Check for the ID in the recurring events
+        for idx, r_e in enumerate(self.recur_events):
+            if r_e.id == new_event.id:
+                self.recur_events[idx] = new_event
+                return
+
+        # If we've got to here then it's a new event
+        if new_event.recurs:
+            self.recur_events.append(new_event)
+        else:
+            self.events.append(new_event)
+
+    def refresh_events(self):
+        """Looks to the API for updates to the events"""
+        # Create a session in this scope
+        _temp_session = requests.Session()
+        _temp_session.cookies.set("_session_id", self.s_id)
+
+        url = f"{API_URL}/calendar/{self.unique_id}/events/sync"
+        response = _temp_session.get(
+            url,
+            headers={"Content-Type": "application/json", "X-Timetreea": API_AGENT},
+        )
+        assert response.status_code == 200, print(f"Failed to get events of the calendar {self.name}")
+
+        # TODO properly implement a check for if events have updated beyond 1 chunk
+        r_json = response.json()
+        events = r_json["events"]
+        events_tt = unpack_events(events)
+        new_sorted_events_tt = sort_events_by_updated(events_tt)
+        curr_sorted_events_tt = sort_events_by_updated(self.events)
+
+        updated_events = []
+        last_updated_time = curr_sorted_events_tt[0].updated
+        # Check if any new events have been edited more recently
+        for event_tt in new_sorted_events_tt:
+            if event_tt.updated.as_ms() > last_updated_time.as_ms():
+                updated_events.append(event_tt)
+            else:
+                break
+
+        for e in updated_events:
+            self._new_event(e)
+
 
 class TTEvent(object):
     """Event Object that relates to a single event, within a TTCalendar."""
@@ -237,10 +311,11 @@ class TTEvent(object):
         self.id = full_dictionary["id"]
         self.author_id = full_dictionary["author_id"]
         self.title = full_dictionary["title"]
-        self.updated = full_dictionary["updated_at"]
+        self.updated = TTTime(ms_since_e=full_dictionary["updated_at"])
         self.start = TTTime(ms_since_e=full_dictionary["start_at"])
         # All Day events are considered to end on a day, but last for all of it.
         # A day worth of milliseconds therefore needs to be added.
+        # TODO I have a suspicion that All Day events are being handled incorrectly. Check
         if full_dictionary["all_day"]:
             self.end = TTTime(ms_since_e=full_dictionary["end_at"] + DAY_MS)
         else:

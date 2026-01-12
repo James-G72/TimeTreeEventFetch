@@ -7,7 +7,7 @@ from matplotlib.dates import datestr2num, DateFormatter, DayLocator
 from matplotlib.ticker import AutoMinorLocator
 from matplotlib.patches import Patch
 import tabulate
-from typing import List
+import time
 
 from utils import details_from_config, get_session
 from api_details import API_URL, API_AGENT
@@ -150,11 +150,22 @@ def run_live_view(calendar: TTCalendar, refresh_interval_s: int):
     # TODO it optional for event_between_dates to round to the whole day when filtering
     relevant_events = calendar.events_between_dates(disp_start, disp_end)
 
-    print(f" -- Printing Events between {disp_start.as_dt().strftime(DATE_FMT)} and {disp_end.as_dt().strftime(DATE_FMT)} -- ")
-    print_events(relevant_events, calendar.recur_events, calendar.label_data, calendar.known_users)
+    print(" -- Initialising Loop for Displaying Events --")
+    update_count = 0
+    # TODO add in some sort of exit feature
+    while 1:
+        print(f" -- Printing Events between {disp_start.as_dt().strftime(DATE_FMT)} and {disp_end.as_dt().strftime(DATE_FMT)} -- ")
+        print(f"Update {update_count}: {dt.datetime.now().strftime('%H:%M:%S')}")
+        print_events(relevant_events, calendar.recur_events, calendar.label_data, calendar.known_users)
+
+        # Wait for the required interval before refreshing
+        time.sleep(refresh_interval_s)
+        calendar.refresh_events()
+        relevant_events = calendar.events_between_dates(disp_start, disp_end)
+        update_count += 1
 
 
-def print_events(events: List[TTEvent], recur_events: list, labels: dict, users: dict):
+def print_events(events: list, recur_events: list, labels: dict, users: dict):
     """
     Print a list of events in chronological order with nice formatting.
     :param events: List of TTEvent objects to be printed.
@@ -167,13 +178,28 @@ def print_events(events: List[TTEvent], recur_events: list, labels: dict, users:
     headers = ["Date", "Title", "Label", "Author"]
     entries = []
     for event in events:
-        entries.append(
-            [event.start.as_dt().strftime(DATE_FMT),
-             event.title,
-             labels[event.label_id]["name"],
-             users[event.author_id],
-            ]
-        )
+        if isinstance(event, TTEvent):
+            entries.append(
+                [event.start.as_dt().strftime(DATE_FMT),
+                 event.title,
+                 labels[event.label_id]["name"],
+                 users[event.author_id],
+                ]
+            )
+        else: # Then we have a TTEventRecur object
+            parent_event = None
+            for tte in recur_events:
+                if tte.id == event.parent_id:
+                    parent_event = tte
+            if not parent_event:
+                raise ValueError(f"TTEventRecur with title {event.title} has no parent.")
+            entries.append(
+                [event.start.as_dt().strftime(DATE_FMT),
+                 event.title,
+                 labels[parent_event.label_id]["name"],
+                 users[parent_event.author_id],
+                ]
+            )
     print(tabulate.tabulate(entries, headers, tablefmt="simple_outline", colalign=("centre",)))
 
 
@@ -192,7 +218,7 @@ def main(config_path):
     # This line assumes that there is only one calendar called Ruth
     main_calendar = fetch_calendars(sessionn_id, name_filter="Ruth")[0]
 
-    run_live_view(main_calendar, 100)
+    run_live_view(main_calendar, 10)
 
 
 if __name__ == "__main__":

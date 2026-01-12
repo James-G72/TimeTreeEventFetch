@@ -160,7 +160,7 @@ def run_live_view(calendar: TTCalendar, refresh_interval_s: int):
 
         # Wait for the required interval before refreshing
         time.sleep(refresh_interval_s)
-        calendar.refresh_events()
+        calendar.fetch_events()
         relevant_events = calendar.events_between_dates(disp_start, disp_end)
         update_count += 1
 

@@ -37,15 +37,15 @@ def sort_events_by_start(event_list: list):
 
 def sort_events_by_updated(event_list: list):
     """
-    Sort provided TTEvents by the date they are due to start.
+    Sort provided TTEvents by the date they were last updated.
     :param event_list: list of TTEvent objects.
-    :return: event_list sorted by the start value of each tt_event object.
+    :return: event_list sorted by the updated value of each tt_event object.
     """
     index_list = []
     for i, e in enumerate(event_list):
         index_list.append([e.updated.as_ms(), i])
 
-    sorted_list = sorted(index_list)
+    sorted_list = sorted(index_list, reverse=True)
 
     return [event_list[x[1]] for x in sorted_list]
 
@@ -190,7 +190,7 @@ class TTCalendar(object):
             # Setting the end date to an infeasibly distant date
             until = TTTime(dt_object=dt.datetime.now()+dt.timedelta(weeks=1000))
         if not since:
-            since = self.created
+            since = TTTime(self.created.as_dt() - dt.timedelta(weeks=52))
         # Create a session in this scope
         _temp_session = requests.Session()
         _temp_session.cookies.set("_session_id", self.s_id)
@@ -243,7 +243,7 @@ class TTCalendar(object):
         """
         If an event has been created or updated, it needs to be replaced by id or appended if new.
         :param new_event: A new TTEvent object.
-        :return:
+        :return: None
         """
         # Check for the ID in the events
         for idx, e in enumerate(self.events):
@@ -387,14 +387,12 @@ class TTEvent(object):
         instances = []
         print(f"Processing {self.title}")
         while latest_event_time.as_dt() < end_date.as_dt():
-            latest_event_time.apply_delta(recur_gap, interval)
             if start_date.as_dt() <= latest_event_time.as_dt() <= end_date.as_dt():
                 if latest_event_time.as_ms() not in exceptions:
                     _latest_end = latest_event_time.as_dt() + dt.timedelta(milliseconds=self.duration)
                 instances.append(TTEventRecur(self, latest_event_time, TTTime(dt_object=_latest_end)))
-            if latest_event_time.as_ms() in exceptions:
-                curr_date_mse = latest_event_time.as_ms()
-                t = 1
+            latest_event_time.apply_delta(recur_gap, interval)
+
 
         return instances
 

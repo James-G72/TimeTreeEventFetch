@@ -61,6 +61,18 @@ def unpack_events(event_list):
 
     return tt_events
 
+def round_tttime_to_day(ttt_obj, up=False):
+    """
+    Round a datetime object to the
+    :param ttt_obj: TTTime object to be rounded
+    :param up: If True, then round up a day
+    :return: Rounded TTTime object
+    """
+    if up:
+        ttt_obj.apply_delta(relativedelta(days=1), 1)
+    day_only = ttt_obj.as_dt().strftime("%Y%m%d")
+
+    return TTTime(dt_object=dt.datetime.strptime(day_only, "%Y%m%d"))
 
 # TODO add the operator functionality such that the TTTime objects can be used directly as datetime objects and compared
 class TTTime(object):
@@ -218,14 +230,18 @@ class TTCalendar(object):
 
         self.bounds = [since, until]
 
-    def events_between_dates(self, start_date, end_date):
+    def events_between_dates(self, start_date, end_date, full_day=False):
         """
         Return all events, including recurring events, that occur in the datetime window provided.
         Recurring events are returned as TTEventRecurence objects
         :param start_date: datetime object for the start of the window
         :param end_date: datetime object for the start of the window
-        :return:
+        :param full_day: If true then the search window is rounded to the nearest days
+        :return: All TTEvent objects in the window.
         """
+        if full_day:
+            start_date = round_tttime_to_day(start_date, up=False)
+            end_date = round_tttime_to_day(end_date, up=True)
         matching_events = []
         # Getting all standard events
         for e in self.events:
@@ -384,15 +400,16 @@ class TTEvent(object):
         else:
             # I have only seen interval not used in the context where it is a weekly recurring event
             interval = 1
+
         instances = []
         print(f"Processing {self.title}")
         while latest_event_time.as_dt() < end_date.as_dt():
             if start_date.as_dt() <= latest_event_time.as_dt() <= end_date.as_dt():
                 if latest_event_time.as_ms() not in exceptions:
                     _latest_end = latest_event_time.as_dt() + dt.timedelta(milliseconds=self.duration)
-                instances.append(TTEventRecur(self, latest_event_time, TTTime(dt_object=_latest_end)))
+                    # start time is explicitly set as a new TTTime object to stop the update to latest_event_time below from changing the value
+                    instances.append(TTEventRecur(self, TTTime(dt_object=latest_event_time.as_dt()), TTTime(dt_object=_latest_end)))
             latest_event_time.apply_delta(recur_gap, interval)
-
 
         return instances
 

@@ -147,8 +147,8 @@ def run_live_view(calendar: TTCalendar, refresh_interval_s: int):
 
     # If no start and end times are passed to the fetch_events function then all events are fetched.
     calendar.fetch_events()
-    # TODO it optional for event_between_dates to round to the whole day when filtering
-    relevant_events = calendar.events_between_dates(disp_start, disp_end)
+
+    relevant_events = calendar.events_between_dates(disp_start, disp_end, full_day=True)
 
     print(" -- Initialising Loop for Displaying Events --")
     update_count = 0

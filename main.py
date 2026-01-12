@@ -11,7 +11,7 @@ import time
 
 from utils import details_from_config, get_session
 from api_details import API_URL, API_AGENT
-from time_tree_struct import TTCalendar, TTEvent, TTTime
+from time_tree_struct import TTCalendar, TTEvent, TTTime, round_tttime_to_day
 
 CONFIG_PATH = os.path.join(os.getcwd(), "config.txt")
 
@@ -154,14 +154,15 @@ def run_live_view(calendar: TTCalendar, refresh_interval_s: int):
     update_count = 0
     # TODO add in some sort of exit feature
     while 1:
-        print(f" -- Printing Events between {disp_start.as_dt().strftime(DATE_FMT)} and {disp_end.as_dt().strftime(DATE_FMT)} -- ")
+        print(f" -- Printing Events between {round_tttime_to_day(disp_start).as_dt().strftime(DATE_FMT)} and "
+              f"{round_tttime_to_day(disp_end).as_dt().strftime(DATE_FMT)} -- ")
         print(f"Update {update_count}: {dt.datetime.now().strftime('%H:%M:%S')}")
         print_events(relevant_events, calendar.recur_events, calendar.label_data, calendar.known_users)
 
         # Wait for the required interval before refreshing
         time.sleep(refresh_interval_s)
         calendar.fetch_events()
-        relevant_events = calendar.events_between_dates(disp_start, disp_end)
+        relevant_events = calendar.events_between_dates(disp_start, disp_end, full_day=True)
         update_count += 1
 
 

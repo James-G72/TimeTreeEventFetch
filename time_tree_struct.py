@@ -69,7 +69,7 @@ def round_tttime_to_day(ttt_obj, up=False):
     :return: Rounded TTTime object
     """
     if up:
-        ttt_obj.apply_delta(relativedelta(days=1), 1)
+        _dt_plus_day = ttt_obj.as_dt() + dt.timedelta(days=1)
     day_only = ttt_obj.as_dt().strftime("%Y%m%d")
 
     return TTTime(dt_object=dt.datetime.strptime(day_only, "%Y%m%d"))
@@ -333,7 +333,7 @@ class TTEvent(object):
         # A day worth of milliseconds therefore needs to be added.
         # TODO I have a suspicion that All Day events are being handled incorrectly. Check
         if full_dictionary["all_day"]:
-            self.end = TTTime(ms_since_e=full_dictionary["end_at"] + DAY_MS)
+            self.end = TTTime(ms_since_e=full_dictionary["end_at"] + DAY_MS - 1000)
         else:
             self.end = TTTime(ms_since_e=full_dictionary["end_at"])
         self.duration = self.end.as_ms() - self.start.as_ms()
@@ -402,7 +402,6 @@ class TTEvent(object):
             interval = 1
 
         instances = []
-        print(f"Processing {self.title}")
         while latest_event_time.as_dt() < end_date.as_dt():
             if start_date.as_dt() <= latest_event_time.as_dt() <= end_date.as_dt():
                 if latest_event_time.as_ms() not in exceptions:

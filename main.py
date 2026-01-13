@@ -9,9 +9,9 @@ from matplotlib.patches import Patch
 import tabulate
 import time
 
+from time_tree_struct import TTCalendar, TTEvent, TTTime, round_tttime_to_day
 from utils import details_from_config, get_session
 from api_details import API_URL, API_AGENT
-from time_tree_struct import TTCalendar, TTEvent, TTTime, round_tttime_to_day
 
 CONFIG_PATH = os.path.join(os.getcwd(), "config.txt")
 

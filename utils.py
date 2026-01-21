@@ -24,35 +24,33 @@ def details_from_config(config_path:str):
     return login_details
 
 
-def get_session(login_details:dict):
+def get_session(login_details: dict):
     """
     Initialise a session with the TimeTree API using the email login route
     :param login_details: Dictionary of Username and Password
     :return: session_id, A synced session id with the TimeTree server.
     """
-    """
-        Log in to the TimeTree app and return the session ID.
-        """
     url = f"{API_URL}/auth/email/signin"
     payload = {
-        "uid":login_details["Username"],
-        "password":login_details["Password"],
-        "uuid":str(uuid.uuid4()).replace("-",""),
+        "uid": login_details["Username"],
+        "password": login_details["Password"],
+        "uuid": str(uuid.uuid4()).replace("-", ""),
     }
     headers = {
-        "Content-Type":"application/json",
-        "X-Timetreea":API_AGENT,
+        "Content-Type": "application/json",
+        "X-Timetreea": API_AGENT,
     }
 
-    response = requests.put(url,json=payload,headers=headers,timeout=10)
+    response = requests.put(url, json=payload, headers=headers, timeout=10)
 
     if response.status_code != 200:
+        # TODO work out what to actually do if it fails.
         print("Login failed")
-    try:
+    else:
         session_id = response.cookies["_session_id"]
         return session_id
-    except KeyError:
-        return None
+
+    return None
 
 
 def dt_to_milli_since_e(datetime_obj: dt.datetime):

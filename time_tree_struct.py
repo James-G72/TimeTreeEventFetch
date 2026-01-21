@@ -3,9 +3,10 @@ import datetime as dt
 from dateutil.relativedelta import relativedelta
 import pytz
 import requests
+import uuid
 
 from api_details import API_URL, API_AGENT
-from utils import dt_to_milli_since_e, milli_since_e_to_dt, sort_events_by_updated, sort_events_by_start
+from utils import dt_to_milli_since_e, milli_since_e_to_dt, sort_events_by_updated, sort_events_by_start, get_session
 
 EXCEPTION_DATE_FMT = "%Y%m%dT%H%M%SZ"
 PRINT_DATE_FMT = "%d-%m-%Y %H:%M"
@@ -63,7 +64,7 @@ class TTTime(object):
         self.time += duration * repeats
 
 
-def round_tttime_to_day(ttt_obj, up: bool =False):
+def round_tttime_to_day(ttt_obj:TTTime, up: bool =False):
     """
     Round a TTTime object to the nearest day and return as a datetime
     :param ttt_obj: TTTime object to be rounded
@@ -196,22 +197,32 @@ class TTEventRecur(object):
         self.end = instance_end
         self.title = parent_event.title
 
-
+# I don't know how long they take to expire but it is presumably less than a day for example.
+# I think this will require moving the get_session to the calendar object and initialising it empty first.
 class TTCalendar(object):
     """Calendar Object relating to a single Time Tree calendar."""
 
-    def __init__(self, session_id:str, response_dict:dict):
+    def __init__(self, session_id:str, response_dict:dict, login: dict):
         """
         Initialise a calendar instance from a full API response.
         :param session_id: TimeTree API session ID
         :param response_dict: Full response from the API with all calendar information.
+        :param login: Dictionary of login details.
         """
         self.events = None
         self.recur_events = None
         self.bounds = None
         self.s_id = session_id
+        self.login_info = login
         # Unpack the API response to get basic data
         self._extract_useful_info(response_dict)
+
+    def _refresh_session(self):
+        """
+        Obtain a new session id if ever a request fails.
+        :return: None
+        """
+        self.s_id = get_session(self.login_info)
 
     def _extract_useful_info(self, resp:dict):
         """
@@ -243,16 +254,23 @@ class TTCalendar(object):
     def _contact_api(self, session:requests.session, url:str):
         """
         Get an individual response from the TimeTree API.
-        :type session: requests session object to be queried
+        :param session: requests session object to be queried
         :param url: Later part of he url to hit at the API
-        :return: full response from the API
+        :return: full response from the API in json
         """
-        response = session.get(url,
-                               headers={"Content-Type": "application/json", "X-Timetreea": API_AGENT},
-                               )
-        assert response.status_code == 200, print(f"Failed to get events of the calendar {self.name}")
+        tries = 0
+        while tries < 3:
+            response = session.get(url,
+                                   headers={"Content-Type": "application/json", "X-Timetreea": API_AGENT},
+                                   )
+            if response.status_code != 200:
+                print(f"Failed to get events of the calendar {self.name}")
+                # Assuming an expired session could be an issue
+                self._refresh_session()
+            else:
+                return response.json()
 
-        return response.json()
+        return None
 
     def _get_events_recur(self, temp_session:requests.session, since:TTTime):
         """

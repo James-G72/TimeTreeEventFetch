@@ -5,24 +5,28 @@ import datetime as dt
 import tabulate
 import time
 
+from api_details import API_URL, API_AGENT
 from time_tree_struct import TTCalendar, TTEvent, TTTime, round_tttime_to_day
 from utils import details_from_config, get_session
-from api_details import API_URL, API_AGENT
 
 CONFIG_PATH = os.path.join(os.getcwd(), "config.txt")
 
 DATE_FMT = "%d-%b-%Y %H:%M"
 
 
-def fetch_calendars(s_id, name_filter=None):
+def fetch_calendars(logins: dict, name_filter=None):
     """
     Perform a TimeTree API request to get the list of all calendars for the logged-in User.
-    :param s_id: Session ID for the login.
+    :param logins: Dictionary of login details.
     :param name_filter: If provided, then filter for only calendars with that name.
     :return: List of TTCalendar objects for all calendars found.
     """
+    session_id = get_session(logins)
+
+    print(f"TimeTree API Session ID is: {session_id}")
+
     session = requests.Session()
-    session.cookies.set("_session_id",s_id)
+    session.cookies.set("_session_id", session_id)
     url = f"{API_URL}/calendars?since=0"
     response = session.get(
         url,
@@ -38,9 +42,9 @@ def fetch_calendars(s_id, name_filter=None):
     for cal in response.json()["calendars"]:
         if name_filter:
             if cal["name"] == name_filter:
-                cal_list.append(TTCalendar(session_id=s_id, response_dict=cal))
+                cal_list.append(TTCalendar(session_id=session_id, response_dict=cal, login=logins))
         else:
-            cal_list.append(TTCalendar(session_id=s_id, response_dict=cal))
+            cal_list.append(TTCalendar(session_id=session_id, response_dict=cal, login=logins))
 
     return cal_list
 
@@ -111,7 +115,13 @@ def print_events(events: list, recur_events: list, labels: dict, users: dict):
                  users[parent_event.author_id],
                 ]
             )
-    print(tabulate.tabulate(entries, headers, tablefmt="simple_outline", colalign=("centre",)))
+
+    # Reordering the table by event start time
+    date_time_entries = [[dt.datetime.strptime(e[0],DATE_FMT), idx] for idx, e in enumerate(entries)]
+    sorted_entries_with_idx = sorted(date_time_entries)
+    sorted_entries = [entries[e[1]] for e in sorted_entries_with_idx]
+
+    print(tabulate.tabulate(sorted_entries, headers, tablefmt="simple_outline", colalign=("centre",)))
 
 
 def main(config_path):
@@ -122,12 +132,8 @@ def main(config_path):
     """
     login_dict = details_from_config(config_path)
 
-    sessionn_id = get_session(login_dict)
-
-    print(f"TimeTree API Session ID is: {sessionn_id}")
-
     # This line assumes that there is only one calendar called Ruth
-    main_calendar = fetch_calendars(sessionn_id, name_filter="Ruth")[0]
+    main_calendar = fetch_calendars(login_dict, name_filter="Ruth")[0]
 
     run_live_view(main_calendar, 10)
 

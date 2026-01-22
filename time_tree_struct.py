@@ -3,7 +3,6 @@ import datetime as dt
 from dateutil.relativedelta import relativedelta
 import pytz
 import requests
-import uuid
 
 from api_details import API_URL, API_AGENT
 from utils import dt_to_milli_since_e, milli_since_e_to_dt, sort_events_by_updated, sort_events_by_start, get_session
@@ -21,7 +20,6 @@ RECUR_GAPS = {
 DAY_MS = 1000*60*60*24
 
 
-# TODO add the operator functionality such that the TTTime objects can be used directly with datetime objects and compared
 class TTTime(object):
     """A custom time object that prevents the need to convert from datetime to milliseconds since epoch."""
 
@@ -63,6 +61,89 @@ class TTTime(object):
         """
         self.time += duration * repeats
 
+    def __repr__(self):
+        """Str conversion."""
+        return self.as_str()
+
+    def __lt__(self, other):
+        """Compute less than."""
+        if isinstance(other, TTTime):
+            return self.time < other.time
+        elif isinstance(other, dt.datetime):
+            if not other.tzinfo:
+                other = pytz.utc.localize(other)
+            return self.time < other
+        else:
+            return NotImplemented
+
+    def __le__(self, other):
+        """Compute less than or equal to."""
+        if isinstance(other, TTTime):
+            return self.time <= other.time
+        elif isinstance(other, dt.datetime):
+            if not other.tzinfo:
+                other = pytz.utc.localize(other)
+            return self.time <= other
+        else:
+            return NotImplemented
+
+    def __gt__(self, other):
+        """Compute less than."""
+        if isinstance(other, TTTime):
+            return self.time > other.time
+        elif isinstance(other, dt.datetime):
+            if not other.tzinfo:
+                other = pytz.utc.localize(other)
+            return self.time > other
+        else:
+            return NotImplemented
+
+    def __ge__(self, other):
+        """Compute less than or equal to."""
+        if isinstance(other, TTTime):
+            return self.time >= other.time
+        elif isinstance(other, dt.datetime):
+            if not other.tzinfo:
+                other = pytz.utc.localize(other)
+            return self.time >= other
+        else:
+            return NotImplemented
+
+    def __add__(self, other):
+        """Perform the addition of either a datetime.timedelta object or a dateutil.relativedelta"""
+        if isinstance(other, dt.timedelta):
+            return TTTime(dt_object=self.time + other)
+        elif isinstance(other, relativedelta):
+            return TTTime(dt_object=self.time + other)
+        else:
+            return NotImplemented
+
+    __radd__ = __add__
+
+    def __sub__(self, other):
+        """Perform the subtraction of either a datetime.timedelta object or a dateutil.relativedelta"""
+        if isinstance(other, dt.timedelta):
+            return TTTime(dt_object=self.time - other)
+        elif isinstance(other, relativedelta):
+            return TTTime(dt_object=self.time - other)
+        else:
+            return NotImplemented
+
+    __rsub__ = __sub__
+
+    def __eq__(self, other):
+        """Compute equal."""
+        if isinstance(other, TTTime):
+            return self.time == other.time
+        elif isinstance(other, dt.datetime):
+            return self.time == other
+        else:
+            return NotImplemented
+
+    def __ne__(self, other):
+        """Compute not equal."""
+        return not self.__eq__(other)
+
 
 def round_tttime_to_day(ttt_obj:TTTime, up: bool =False):
     """
@@ -72,8 +153,8 @@ def round_tttime_to_day(ttt_obj:TTTime, up: bool =False):
     :return: Datetime object
     """
     if up:
-        _dt_plus_day = ttt_obj.as_dt() + dt.timedelta(days=1)
-    day_only = ttt_obj.as_dt().strftime("%Y%m%d")
+        _dt_plus_day = ttt_obj + dt.timedelta(days=1)
+    day_only = ttt_obj.time.strftime("%Y%m%d")
 
     return TTTime(dt_object=dt.datetime.strptime(day_only, "%Y%m%d"))
 
@@ -106,7 +187,7 @@ class TTEvent(object):
         self.duration = self.end.as_ms() - self.start.as_ms()
         self.label_id = full_dictionary["label_id"]
         if len(full_dictionary["recurrences"]) > 0:
-            self._store_recurance(full_dictionary["recurrences"])
+            self._store_recurrence(full_dictionary["recurrences"])
 
     def _unpack_rules(self, rule_list:str):
         """
@@ -121,7 +202,7 @@ class TTEvent(object):
 
         self.recur_rules = _tmp_rule_dict
 
-    def _store_recurance(self, rule_list:str):
+    def _store_recurrence(self, rule_list:str):
         """
         Store all relevant information about recurrences.
         :param rule_list: string with a list of all rules
@@ -158,9 +239,9 @@ class TTEvent(object):
         # Preventing the function from wasting time and memory calculating recurrences
         if "UNTIL" in self.recur_rules.keys():
             recur_finish_date = self._handle_until_fmt(self.recur_rules["UNTIL"])
-            if recur_finish_date.as_dt() < start_date.as_dt():
+            if recur_finish_date < start_date:
                 return []
-        if self.start.as_dt() > end_date.as_dt():
+        if self.start > end_date:
             return []
 
         # Getting exception dates if they're there
@@ -178,12 +259,12 @@ class TTEvent(object):
             interval = 1
 
         instances = []
-        while latest_event_time.as_dt() < end_date.as_dt():
-            if start_date.as_dt() <= latest_event_time.as_dt() <= end_date.as_dt():
+        while latest_event_time < end_date:
+            if start_date <= latest_event_time <= end_date:
                 if latest_event_time.as_ms() not in exceptions:
-                    _latest_end = latest_event_time.as_dt() + dt.timedelta(milliseconds=self.duration)
+                    _latest_end = latest_event_time + dt.timedelta(milliseconds=self.duration)
                     # start time is explicitly set as a new TTTime object to stop the update to latest_event_time below from changing the value
-                    instances.append(TTEventRecur(self, TTTime(dt_object=latest_event_time.as_dt()), TTTime(dt_object=_latest_end)))
+                    instances.append(TTEventRecur(self, TTTime(dt_object=latest_event_time.time), TTTime(dt_object=_latest_end.as_dt())))
             latest_event_time.apply_delta(recur_gap, interval)
 
         return instances
@@ -323,9 +404,9 @@ class TTCalendar(object):
         """
         if not until:
             # Setting the end date to an infeasibly distant date
-            until = TTTime(dt_object=dt.datetime.now()+dt.timedelta(weeks=1000))
+            until = dt.datetime.now() + dt.timedelta(weeks=1000)
         if not since:
-            since = TTTime(self.created.as_dt() - dt.timedelta(weeks=52))
+            since = self.created - dt.timedelta(weeks=52)
         # Create a session in this scope
         _temp_session = requests.Session()
         _temp_session.cookies.set("_session_id", self.s_id)
@@ -348,7 +429,7 @@ class TTCalendar(object):
         self.events = []
         self.recur_events = []
         for tt_event in sorted_events_tt:
-            if since.as_dt() <= tt_event.start.as_dt() <= until.as_dt():
+            if since <= tt_event.start <= until:
                 if tt_event.recurs:
                     self.recur_events.append(tt_event)
                 else:
@@ -371,7 +452,7 @@ class TTCalendar(object):
         matching_events = []
         # Getting all standard events
         for e in self.events:
-            if start_date.as_dt() <= e.start.as_dt() <= end_date.as_dt():
+            if start_date <= e.start <= end_date:
                 matching_events.append(e)
 
         for r_e in self.recur_events:
@@ -428,7 +509,7 @@ class TTCalendar(object):
         last_updated_time = curr_sorted_events_tt[0].updated
         # Check if any new events have been edited more recently
         for event_tt in new_sorted_events_tt:
-            if event_tt.updated.as_ms() > last_updated_time.as_ms():
+            if event_tt.updated > last_updated_time:
                 updated_events.append(event_tt)
             else:
                 break

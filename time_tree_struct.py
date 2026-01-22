@@ -85,6 +85,8 @@ class TTEvent(object):
         """Init"""
         self.parent_id = event_dict["calendar_id"]
         self.recurs = False
+        self.deleted = False
+        self.deleted_date = None
 
         self._extract_useful_info(event_dict)
 
@@ -293,13 +295,25 @@ class TTCalendar(object):
 
         return events
 
-    def _update_deleted(self):
+    def _update_deleted(self, updated_events: list):
         """
-        Given a new sync, identify if any events have been deleted.
+        Given a new sync, identify if any events have been deleted. We should only enter this function if self.events
+        has TTEvents already populated.
+        :param updated_events: list of TTEvent object that are
         :return: None
         """
-        # TODO at the end of a fetch, check to see if the new event tree shows that any events in the future have been deleted.
-        t = 1
+        new_id_list = [e.id for e in updated_events]
+        missing_list = []
+        for e in self.events:
+            if e.id not in new_id_list:
+                e.deleted = True
+                e.deleted_time = TTTime(dt_object=dt.datetime.now())
+                missing_list.append(e)
+        if len(missing_list) > 0:
+            if not self.deleted_events:
+                self.deleted_events = missing_list
+            else:
+                self.deleted_events.extend(missing_list)
 
     def fetch_events(self, since:TTTime=None, until:TTTime=None):
         """Request all events relevant to the calendar that start between the given times.
@@ -327,6 +341,9 @@ class TTCalendar(object):
         events_tt = unpack_events(events)
 
         sorted_events_tt = sort_events_by_start(events_tt)
+
+        if self.events is not None:
+            self._update_deleted(sorted_events_tt)
 
         self.events = []
         self.recur_events = []

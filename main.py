@@ -71,7 +71,7 @@ def run_live_view(calendar: TTCalendar, refresh_interval_s: int):
         print(f" -- Printing Events between {round_tttime_to_day(disp_start).as_dt().strftime(DATE_FMT)} and "
               f"{round_tttime_to_day(disp_end).as_dt().strftime(DATE_FMT)} -- ")
         print(f"Update {update_count}: {dt.datetime.now().strftime('%H:%M:%S')}")
-        print_events(relevant_events, calendar.recur_events, calendar.label_data, calendar.known_users)
+        print_events(relevant_events, calendar.recur_events, calendar.deleted_events, calendar.label_data, calendar.known_users)
 
         # Wait for the required interval before refreshing
         time.sleep(refresh_interval_s)
@@ -80,14 +80,15 @@ def run_live_view(calendar: TTCalendar, refresh_interval_s: int):
         update_count += 1
 
 
-def print_events(events: list, recur_events: list, labels: dict, users: dict):
+def print_events(events: list, recur_events: list, deleted_events: list, labels: dict, users: dict):
     """
     Print a list of events in chronological order with nice formatting.
     :param events: List of TTEvent objects to be printed.
     :param recur_events: List of all recurring events that could be parents of TTEventRecurs
+    :param deleted_events: List of all events that have been deleted from the Calendar since the programme was initialised.
     :param labels: List of label information.
     :param users: List of author information.
-    :return:
+    :return: None
     """
     # Creating tabulate header and table list
     headers = ["Date", "Title", "Label", "Author"]
@@ -122,6 +123,12 @@ def print_events(events: list, recur_events: list, labels: dict, users: dict):
     sorted_entries = [entries[e[1]] for e in sorted_entries_with_idx]
 
     print(tabulate.tabulate(sorted_entries, headers, tablefmt="simple_outline", colalign=("centre",)))
+
+    # Print events that have been deleted recently
+    if deleted_events is not None:
+        print("Events deleted:")
+        for e in deleted_events:
+            print(f"    {e.title}")
 
 
 def main(config_path):

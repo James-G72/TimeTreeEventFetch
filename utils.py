@@ -9,6 +9,8 @@ CONFIG_PATH = os.path.join(os.getcwd(), "config.txt")
 def details_from_config(config_path:str):
     """Extract the required username and password from config."""
     login_details = {}
+    assert os.path.exists(config_path), FileNotFoundError("You must have a file called config.txt located in this repository."
+                                                          "Edit CONFIG_PATH in utils.py to change the default location.")
     with open(config_path) as f:
         for line in f.readlines():
             if "Username" in line:

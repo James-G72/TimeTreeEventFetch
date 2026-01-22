@@ -197,8 +197,7 @@ class TTEventRecur(object):
         self.end = instance_end
         self.title = parent_event.title
 
-# I don't know how long they take to expire but it is presumably less than a day for example.
-# I think this will require moving the get_session to the calendar object and initialising it empty first.
+
 class TTCalendar(object):
     """Calendar Object relating to a single Time Tree calendar."""
 
@@ -207,11 +206,12 @@ class TTCalendar(object):
         Initialise a calendar instance from a full API response.
         :param session_id: TimeTree API session ID
         :param response_dict: Full response from the API with all calendar information.
-        :param login: Dictionary of login details.
+        :param login: Dictionary of login details. Allows session ID to be refreshed.
         """
         self.events = None
         self.recur_events = None
         self.bounds = None
+        self.deleted_events = None
         self.s_id = session_id
         self.login_info = login
         # Unpack the API response to get basic data
@@ -258,6 +258,7 @@ class TTCalendar(object):
         :param url: Later part of he url to hit at the API
         :return: full response from the API in json
         """
+        # TODO add some sort of handling for an expired session token. Currently unsure what to expect.
         tries = 0
         while tries < 3:
             response = session.get(url,
@@ -269,6 +270,8 @@ class TTCalendar(object):
                 self._refresh_session()
             else:
                 return response.json()
+            tries += 1
+        print(f"Could not get a valid response from the API after {tries} tries.")
 
         return None
 
@@ -289,6 +292,14 @@ class TTCalendar(object):
             events.extend(self._get_events_recur(temp_session, since_time))
 
         return events
+
+    def _update_deleted(self):
+        """
+        Given a new sync, identify if any events have been deleted.
+        :return: None
+        """
+        # TODO at the end of a fetch, check to see if the new event tree shows that any events in the future have been deleted.
+        t = 1
 
     def fetch_events(self, since:TTTime=None, until:TTTime=None):
         """Request all events relevant to the calendar that start between the given times.
